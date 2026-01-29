@@ -3,7 +3,9 @@ import cors from 'cors';
 import multer from 'multer';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
-import { getDatabase } from './database.js';
+import fs from 'fs';
+import path from 'path';
+import { getDatabase, closeDatabase, initDatabase } from './database.js';
 import { calculateBrokerage, calculateNetProfit } from './utils/brokerageCalculator.js';
 
 const app = express();
@@ -17,7 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize database
-const db = getDatabase();
+let db = getDatabase();
 
 // ===== MEMBER ROUTES =====
 
@@ -1126,6 +1128,85 @@ app.get('/api/dashboard-stats', (req, res) => {
 });
 
 
+
+// ===== DATABASE MANAGEMENT ROUTES =====
+
+// Export Database (Download)
+app.get('/api/database/export', (req, res) => {
+  try {
+    // Flush WAL to disk to ensure backup is current
+    if (db) {
+      try {
+        db.pragma('wal_checkpoint(RESTART)');
+        console.log('✅ WAL flushed for export');
+      } catch (e) {
+        console.warn('⚠️ FAL checkpoint warning:', e.message);
+      }
+    }
+
+    const file = path.join(process.cwd(), 'db', 'trading.db');
+    if (fs.existsSync(file)) {
+      res.download(file, `trading-backup-${new Date().toISOString().split('T')[0]}.db`);
+    } else {
+      res.status(404).json({ error: 'Database file not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Import Database (Restore)
+// Import Database (Restore)
+app.post('/api/database/import', upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  try {
+    const dbDir = path.join(process.cwd(), 'db');
+    const dbPath = path.join(dbDir, 'trading.db');
+    const walPath = path.join(dbDir, 'trading.db-wal');
+    const shmPath = path.join(dbDir, 'trading.db-shm');
+    const backupPath = path.join(dbDir, `trading.db.bak-${Date.now()}`);
+
+    // 1. Close existing connection (to release file lock)
+    try {
+      closeDatabase();
+      console.log('Database connection closed for restore.');
+    } catch (e) {
+      console.warn('Warning: Failed to close DB connection:', e.message);
+    }
+
+    // 2. Backup existing
+    if (fs.existsSync(dbPath)) {
+      fs.copyFileSync(dbPath, backupPath);
+    }
+
+    // 3. Clean up WAL files (CRITICAL: prevents old state resurrection)
+    if (fs.existsSync(walPath)) fs.unlinkSync(walPath);
+    if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath);
+
+    // 4. Write new file (Overwrite)
+    fs.writeFileSync(dbPath, req.file.buffer);
+
+    // 5. Re-initialize database connection
+    try {
+      db = initDatabase();
+      console.log('Database connection re-initialized.');
+    } catch (e) {
+      console.error('Failed to re-init DB:', e);
+      throw new Error('Failed to initialize restored database. File might be corrupt.');
+    }
+
+    res.json({ success: true, message: 'Database restored successfully. The application will reload.' });
+
+  } catch (error) {
+    console.error('Restore failed:', error);
+    // Attempt re-init if failed, so server isn't dead
+    try { if (!db) db = initDatabase(); } catch (e) { }
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Health check
 app.get('/api/health', (req, res) => {

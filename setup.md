@@ -69,4 +69,16 @@ Once the system starts, open your browser and go to:
   Ensure the backend server is actually running. If you are running `npm run dev` only, the backend won't start. Use `npm start`.
 
 ---
+
+---
+
+## 💾 Migrating Data (Export/Import)
+
+If you are moving to a new computer or want to backup your data:
+
+1.  **Export:** Go to **Settings > Data Management** and click **Download Backup**. This saves your `trading.db` file.
+2.  **Import:** On the new machine (after setup), go to **Settings > Data Management**, click **Restore Database**, and upload your backup file.
+    *   *Note: This will replace all existing data on the new machine.*
+
+---
 **Enjoy Managing Your Trades! 📈**

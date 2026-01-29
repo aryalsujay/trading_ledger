@@ -22,6 +22,18 @@ CREATE TABLE IF NOT EXISTS instrument_types (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Symbols table
+CREATE TABLE IF NOT EXISTS symbols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT UNIQUE NOT NULL,
+    category TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_symbols_symbol ON symbols(symbol);
+
 -- Capital transactions (deposits and withdrawals)
 CREATE TABLE IF NOT EXISTS capital_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

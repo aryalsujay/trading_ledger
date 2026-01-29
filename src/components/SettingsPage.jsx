@@ -181,6 +181,89 @@ export default function SettingsPage() {
                         </div>
                     )}
                 </div>
+
+                {/* Data Management Card */}
+                <div className="card" style={{ gridColumn: 'span 2' }}>
+                    <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        💾 Data Management
+                    </h2>
+                    <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-md)' }}>
+                        Manage your local database. Use this to migrate data between computers or create backups.
+                    </p>
+
+                    <div className="flex" style={{ gap: 'var(--space-md)' }}>
+                        <div style={{ flex: 1, padding: 'var(--space-md)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+                            <h3>Export Database</h3>
+                            <p style={{ fontSize: '0.9em', marginBottom: '1rem' }}>
+                                Download your current <code>trading.db</code> file. Save this file to transfer your data.
+                            </p>
+                            <a href="http://localhost:3000/api/database/export" download className="btn btn-secondary" style={{ width: '100%', textAlign: 'center', textDecoration: 'none', display: 'inline-block' }}>
+                                📥 Download Backup
+                            </a>
+                        </div>
+
+                        <div style={{ flex: 1, padding: 'var(--space-md)', background: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+                            <h3>Restore Database</h3>
+                            <p style={{ fontSize: '0.9em', marginBottom: '1rem' }}>
+                                Restore a previous backup. <strong>Warning: This will overwrite your current data.</strong>
+                            </p>
+                            <button
+                                className="btn btn-danger"
+                                style={{ width: '100%' }}
+                                onClick={() => {
+                                    setConfirmation({
+                                        isOpen: true,
+                                        title: 'Restore Database',
+                                        message: 'Are you sure you want to restore? This will completely REPLACE your current data with the uploaded file. This action cannot be undone.',
+                                        confirmLabel: 'Yes, Restore Database',
+                                        isDangerous: true,
+                                        onConfirm: () => {
+                                            const input = document.createElement('input');
+                                            input.type = 'file';
+                                            // input.accept = '.db,.sqlite'; // Optional constraint
+                                            input.onchange = async (e) => {
+                                                const file = e.target.files[0];
+                                                if (!file) return;
+
+                                                const formData = new FormData();
+                                                formData.append('file', file);
+
+                                                try {
+                                                    setLoading(true);
+                                                    setMessage({ type: 'info', text: 'Restoring database... Please wait.' });
+
+                                                    const response = await fetch('http://localhost:3000/api/database/import', {
+                                                        method: 'POST',
+                                                        body: formData
+                                                    });
+                                                    const result = await response.json();
+
+                                                    if (response.ok) {
+                                                        setMessage({ type: 'success', text: 'Success! Reloading application...' });
+                                                        setTimeout(() => {
+                                                            window.location.reload();
+                                                        }, 1500);
+                                                    } else {
+                                                        setMessage({ type: 'error', text: 'Restore failed: ' + result.error });
+                                                        alert('Restore failed: ' + result.error);
+                                                    }
+                                                } catch (error) {
+                                                    setMessage({ type: 'error', text: 'Network error: ' + error.message });
+                                                    alert('Network error during restore: ' + error.message);
+                                                } finally {
+                                                    setLoading(false);
+                                                }
+                                            };
+                                            input.click();
+                                        }
+                                    });
+                                }}
+                            >
+                                📤 Upload & Restore
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <ConfirmationModal
