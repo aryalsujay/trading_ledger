@@ -3,11 +3,10 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-do
 import Dashboard from './components/Dashboard';
 import TradesPage from './components/TradesPage';
 import CapitalPage from './components/CapitalPage';
-import AnalyticsPage from './components/AnalyticsPage';
 import SettingsPage from './components/SettingsPage';
 import { useMembers } from './contexts/MemberContext';
 import { SymbolProvider } from './contexts/SymbolContext';
-import { MemberProvider } from './contexts/MemberContext'; // Imported correctly
+import { MemberProvider } from './contexts/MemberContext';
 
 function Navigation() {
     const location = useLocation();
@@ -34,11 +33,6 @@ function Navigation() {
                     <li>
                         <Link to="/capital" className={`nav-link ${isActive('/capital') ? 'active' : ''}`}>
                             Capital
-                        </Link>
-                    </li>
-                    <li>
-                        <Link to="/analytics" className={`nav-link ${isActive('/analytics') ? 'active' : ''}`}>
-                            Analytics
                         </Link>
                     </li>
                     <li>
@@ -73,7 +67,6 @@ function App() {
                             <Route path="/" element={<Dashboard />} />
                             <Route path="/trades" element={<TradesPage />} />
                             <Route path="/capital" element={<CapitalPage />} />
-                            <Route path="/analytics" element={<AnalyticsPage />} />
                             <Route path="/settings" element={<SettingsPage />} />
                         </Routes>
                     </ErrorBoundary>
