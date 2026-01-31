@@ -1,5 +1,5 @@
 {
-  "name": "etf-trading-ledger",
+  "name": "trading-studio",
   "version": "1.0.0",
   "description": "Local ETF trading ledger with profit tracking and brokerage calculator",
   "type": "module",

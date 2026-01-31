@@ -25,22 +25,73 @@ function Dashboard() {
     const [error, setError] = useState(null);
 
     // Filters
-    const [timeRange, setTimeRange] = useState('ALL'); // ALL, 1Y, 6M, 3M, or 'YYYY-MM'
+    const [timeRange, setTimeRange] = useState('ALL'); // ALL, 1Y, 6M, 3M, CUSTOM, or 'YYYY-MM'
+    const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
 
     useEffect(() => {
-        fetchData();
-    }, [selectedMember]);
+        // Initial fetch or when member changes (defaults to ALL or preserved range)
+        if (timeRange !== 'CUSTOM') {
+            fetchData();
+        }
+    }, [selectedMember, timeRange]);
+
+    // Fetch when Custom Range is applied (manual trigger usually, but here we can check validity)
+    const handleApplyCustomRange = () => {
+        if (timeRange === 'CUSTOM' && customDateRange.start && customDateRange.end) {
+            fetchData();
+        }
+    };
 
     const fetchData = async () => {
         setLoading(true);
         setError(null);
         try {
-            const memberQuery = selectedMember ? `?member_id=${selectedMember.id}` : '';
+            const params = new URLSearchParams();
+            if (selectedMember) params.append('member_id', selectedMember.id);
+
+            // Date Filters
+            let startDate, endDate;
+            const now = new Date();
+
+            if (timeRange === '1Y') {
+                startDate = new Date(now.setFullYear(now.getFullYear() - 1)).toISOString().split('T')[0];
+            } else if (timeRange === '6M') {
+                startDate = new Date(now.setMonth(now.getMonth() - 6)).toISOString().split('T')[0];
+            } else if (timeRange === '3M') {
+                startDate = new Date(now.setMonth(now.getMonth() - 3)).toISOString().split('T')[0];
+            } else if (timeRange === 'CUSTOM') {
+                if (customDateRange.start) startDate = customDateRange.start;
+                if (customDateRange.end) endDate = customDateRange.end;
+            } else if (timeRange.match(/^\d{4}-\d{2}$/)) {
+                // Specific MonthYYYY-MM
+                // handled by backend "month" logic? 
+                // Actually, for specific month filter in backend, we can set start/end to first/last of that month
+                // But current UI uses "month" column in frontend filter for that specific dropdown case (legacy logic).
+                // We will keep legacy logic for "Specific Month Picker" purely frontend if we want, OR convert to range.
+                // Let's stick to frontend aggregation for the 'YYYY-MM' dropdown to calculate the "Specific Month" view?
+                // No, "Monthly Performance" endpoint returns monthly buckets. 
+                // If I select "2023-10", I just want to see that row?
+                // Let's just keep 'startDate' empty for specific month selection and let the existing frontend filter handle the specific row picking
+                // UNLESS we want to filter the Capital Growth chart too? Yes.
+                // So:
+                const [y, m] = timeRange.split('-');
+                startDate = `${y}-${m}-01`;
+                // End date = last day of month
+                endDate = new Date(y, m, 0).toISOString().split('T')[0];
+            }
+
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+
+            const queryString = params.toString() ? `?${params.toString()}` : '';
 
             const [monthlyRes, growthRes, statsRes] = await Promise.all([
-                fetch(`http://localhost:3000/api/analytics/monthly-performance${memberQuery}`),
-                fetch(`http://localhost:3000/api/analytics/capital-growth${memberQuery}`),
-                fetchDashboardStats(selectedMember)
+                fetch(`http://localhost:3000/api/analytics/monthly-performance${queryString}`),
+                fetch(`http://localhost:3000/api/analytics/capital-growth${queryString}`),
+                fetchDashboardStats(selectedMember) // Dashboard stats (Top Symbols etc) might need filtering too? 
+                // Ideally yes, but 'fetchDashboardStats' is an imported API wrapper. 
+                // Converting it to use raw fetch here for consistency or leaving it.
+                // It doesn't take date params currently. We can accept that "Top Symbols" is All Time for now.
             ]);
 
             if (!monthlyRes.ok || !growthRes.ok) throw new Error('Failed to fetch analytics data');
@@ -48,7 +99,13 @@ function Dashboard() {
             const monthly = await monthlyRes.json();
             const growth = await growthRes.json();
 
-            setMonthlyStats(monthly);
+            // Calculate ROI for monthly stats
+            const verifiedMonthly = monthly.map(m => ({
+                ...m,
+                roi: m.total_investment > 0 ? (m.net_profit / m.total_investment) * 100 : 0
+            }));
+
+            setMonthlyStats(verifiedMonthly);
             setGrowthData(growth);
             if (statsRes && statsRes.top_symbols) {
                 setTopSymbols(statsRes.top_symbols);
@@ -72,33 +129,15 @@ function Dashboard() {
     }, [monthlyStats]);
 
     // Filter Data based on Time Range
+    // Filter Data based on Time Range (Frontend Filtering - mostly pass-through now since Backend handles it)
     const filteredData = useMemo(() => {
-        let filteredExppenditure = [...monthlyStats];
-        let filteredGrowth = [...growthData];
+        // Since we fetch filtered data from backend, we just return it.
+        // EXCEPT for the "Specific Month" dropdown case where we might receive just that one month's data 
+        // OR if we fetched ALL, we filter.
+        // Current strategy: We fetch filtered data. So 'monthlyStats' is already filtered.
 
-        if (timeRange !== 'ALL') {
-            if (timeRange === '1Y' || timeRange === '6M' || timeRange === '3M') {
-                const monthsHelper = { '3M': 3, '6M': 6, '1Y': 12 };
-                const monthCount = monthsHelper[timeRange];
-                filteredExppenditure = filteredExppenditure.slice(0, monthCount);
-
-                const cutoffDate = new Date();
-                cutoffDate.setMonth(cutoffDate.getMonth() - monthCount);
-                filteredGrowth = filteredGrowth.filter(d => new Date(d.date) >= cutoffDate);
-            } else {
-                // Specific Month Selected (YYYY-MM)
-                filteredExppenditure = filteredExppenditure.filter(m => m.month === timeRange);
-
-                // For growth, show data ONLY for that month
-                const [year, month] = timeRange.split('-');
-                filteredGrowth = filteredGrowth.filter(d => {
-                    const date = new Date(d.date);
-                    return date.getFullYear() === parseInt(year) && (date.getMonth() + 1) === parseInt(month);
-                });
-            }
-        }
-        return { monthly: filteredExppenditure, growth: filteredGrowth };
-    }, [monthlyStats, growthData, timeRange]);
+        return { monthly: monthlyStats, growth: growthData };
+    }, [monthlyStats, growthData]);
 
     // Derived Stats
     const totalStats = useMemo(() => {
@@ -114,7 +153,10 @@ function Dashboard() {
             totalTrades += m.total_trades || 0;
         });
 
-        return { wins, losses, totalPnl, totalTrades, winRate: totalTrades ? ((wins / totalTrades) * 100).toFixed(1) : 0 };
+        const totalInvestmentForPeriod = filteredData.monthly.reduce((acc, m) => acc + (m.total_investment || 0), 0);
+        const periodRoi = totalInvestmentForPeriod > 0 ? (totalPnl / totalInvestmentForPeriod) * 100 : 0;
+
+        return { wins, losses, totalPnl, totalTrades, winRate: totalTrades ? ((wins / totalTrades) * 100).toFixed(1) : 0, totalInvestment: totalInvestmentForPeriod, periodRoi };
     }, [filteredData]);
 
     const pieData = [
@@ -138,58 +180,96 @@ function Dashboard() {
                     </p>
                 </div>
                 <div className="header-actions flex" style={{ gap: '10px' }}>
-                    <select
-                        className="form-select"
-                        value={timeRange}
-                        onChange={(e) => setTimeRange(e.target.value)}
-                        style={{ width: 'auto', minWidth: '160px' }}
-                    >
-                        <option value="ALL">All Time</option>
-                        <optgroup label="Ranges">
-                            <option value="1Y">Last 1 Year</option>
-                            <option value="6M">Last 6 Months</option>
-                            <option value="3M">Last 3 Months</option>
-                        </optgroup>
-                        {availableMonths.length > 0 && (
-                            <optgroup label="Monthly">
-                                {availableMonths.map(month => (
-                                    <option key={month} value={month}>
-                                        {new Date(month + '-01').toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
-                                    </option>
-                                ))}
+                    <div className="flex" style={{ gap: '10px', alignItems: 'center' }}>
+                        <select
+                            className="form-select"
+                            value={timeRange}
+                            onChange={(e) => setTimeRange(e.target.value)}
+                            style={{ width: 'auto', minWidth: '130px' }}
+                        >
+                            <option value="ALL">All Time</option>
+                            <option value="CUSTOM">Custom Range</option>
+                            <optgroup label="Ranges">
+                                <option value="1Y">Last 1 Year</option>
+                                <option value="6M">Last 6 Months</option>
+                                <option value="3M">Last 3 Months</option>
                             </optgroup>
-                        )}
-                    </select>
+                            {availableMonths.length > 0 && (
+                                <optgroup label="Monthly">
+                                    {availableMonths.map(month => (
+                                        <option key={month} value={month}>
+                                            {new Date(month + '-01').toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                        </select>
 
-                    <select
-                        className="form-select"
-                        style={{ width: 'auto', minWidth: '150px' }}
-                        value={selectedMember ? selectedMember.id : ''}
-                        onChange={(e) => {
-                            const id = e.target.value;
-                            if (id === '') setSelectedMember(null);
-                            else setSelectedMember(members.find(m => m.id == id));
-                        }}
-                    >
-                        <option value="">👤 All Members</option>
-                        {members.map(m => (
-                            <option key={m.id} value={m.id}>👤 {m.member_name}</option>
-                        ))}
-                    </select>
-                    <button className="btn btn-secondary" onClick={fetchData} disabled={loading}>
-                        Refresh
-                    </button>
+                        {timeRange === 'CUSTOM' && (
+                            <div className="flex" style={{ gap: '5px' }}>
+                                <input
+                                    type="date"
+                                    className="form-input"
+                                    style={{ padding: '0.4rem', width: 'auto' }}
+                                    value={customDateRange.start}
+                                    onChange={(e) => setCustomDateRange({ ...customDateRange, start: e.target.value })}
+                                />
+                                <span style={{ color: COLORS.textSecondary }}>to</span>
+                                <input
+                                    type="date"
+                                    className="form-input"
+                                    style={{ padding: '0.4rem', width: 'auto' }}
+                                    value={customDateRange.end}
+                                    onChange={(e) => setCustomDateRange({ ...customDateRange, end: e.target.value })}
+                                />
+                                <button className="btn btn-primary btn-sm" onClick={handleApplyCustomRange}>Apply</button>
+                            </div>
+                        )}
+
+                        <select
+                            className="form-select"
+                            style={{ width: 'auto', minWidth: '150px' }}
+                            value={selectedMember ? selectedMember.id : ''}
+                            onChange={(e) => {
+                                const id = e.target.value;
+                                if (id === '') setSelectedMember(null);
+                                else setSelectedMember(members.find(m => m.id == id));
+                            }}
+                        >
+                            <option value="">👤 All Members</option>
+                            {members.map(m => (
+                                <option key={m.id} value={m.id}>👤 {m.member_name}</option>
+                            ))}
+                        </select>
+                        <button className="btn btn-secondary" onClick={fetchData} disabled={loading}>
+                            Refresh
+                        </button>
+                    </div>
                 </div>
             </header>
 
             {/* Summary Cards */}
-            <section className="grid grid-3 mb-4">
+            <section className="grid grid-4 mb-4">
                 <div className="summary-card">
                     <div className="summary-label">Total Capital</div>
                     <div className="summary-value" style={{ color: COLORS.success }}>
                         ₹{currentCapital.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </div>
                     <div className="summary-sublabel">Current Net Worth</div>
+                </div>
+                <div className="summary-card">
+                    <div className="summary-label">Total Investment</div>
+                    <div className="summary-value" style={{ color: COLORS.text }}>
+                        ₹{totalStats.totalInvestment ? totalStats.totalInvestment.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : 0}
+                    </div>
+                    <div className="summary-sublabel">Exited Trades Value</div>
+                </div>
+                <div className="summary-card">
+                    <div className="summary-label">ROI %</div>
+                    <div className="summary-value" style={{ color: totalStats.periodRoi >= 0 ? COLORS.success : COLORS.danger }}>
+                        {totalStats.periodRoi.toFixed(2)}%
+                    </div>
+                    <div className="summary-sublabel">Return on Investment</div>
                 </div>
                 <div className="summary-card">
                     <div className="summary-label">Win Rate ({timeRange === 'ALL' ? 'Overall' : 'Period'})</div>
@@ -282,6 +362,36 @@ function Dashboard() {
                         <div className="flex-center" style={{ height: '100%', color: COLORS.textSecondary }}>No data for selected period</div>
                     )}
                 </div>
+
+                {/* ROI % Chart */}
+                <div className="card" style={{ height: '420px', padding: '1.5rem 1rem 1rem 0', gridColumn: 'span 2' }}>
+                    <h3 className="card-title mb-2" style={{ paddingLeft: '1.5rem', fontSize: '1.2rem' }}>Monthly Return on Investment (ROI %)</h3>
+                    {filteredData.monthly.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={[...filteredData.monthly].reverse()} margin={{ top: 10, right: 15, left: 15, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke={COLORS.border} vertical={false} />
+                                <XAxis dataKey="month" stroke={COLORS.textSecondary} tickMargin={10} />
+                                <YAxis stroke={COLORS.textSecondary} tickFormatter={(val) => `${val}%`} />
+                                <Tooltip
+                                    cursor={{ fill: COLORS.bgSecondary, opacity: 0.8 }}
+                                    contentStyle={{ backgroundColor: COLORS.bgSecondary, borderColor: COLORS.border, color: COLORS.text }}
+                                    formatter={(value) => [`${value.toFixed(2)}%`, 'ROI']}
+                                />
+                                <Line
+                                    type="monotone"
+                                    dataKey="roi"
+                                    name="ROI %"
+                                    stroke={COLORS.primary}
+                                    strokeWidth={3}
+                                    dot={{ fill: COLORS.primary, r: 4 }}
+                                    activeDot={{ r: 6 }}
+                                />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="flex-center" style={{ height: '100%', color: COLORS.textSecondary }}>No data for selected period</div>
+                    )}
+                </div>
             </section>
 
             {/* Stats Breakdown Section */}
@@ -352,6 +462,9 @@ function Dashboard() {
                                         </td>
                                         <td className="text-right" style={{ fontWeight: 700, color: stat.net_profit >= 0 ? COLORS.success : COLORS.danger }}>
                                             ₹{stat.net_profit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                            <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>
+                                                {stat.roi.toFixed(1)}%
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}

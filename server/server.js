@@ -1135,7 +1135,7 @@ app.get('/api/dashboard-stats', (req, res) => {
 // Get monthly performance stats
 app.get('/api/analytics/monthly-performance', (req, res) => {
   try {
-    const { member_id } = req.query;
+    const { member_id, start_date, end_date } = req.query;
 
     let query = `
       SELECT 
@@ -1145,6 +1145,7 @@ app.get('/api/analytics/monthly-performance', (req, res) => {
         SUM(CASE WHEN net_profit < 0 THEN 1 ELSE 0 END) as losing_trades,
         SUM(brokerage) as total_brokerage,
         SUM(net_profit) as net_profit,
+        SUM(buy_price * quantity) as total_investment,
         SUM((sell_price - buy_price) * quantity) as gross_profit
       FROM trades 
       WHERE sell_price IS NOT NULL
@@ -1154,6 +1155,16 @@ app.get('/api/analytics/monthly-performance', (req, res) => {
     if (member_id) {
       query += ' AND member_id = ?';
       params.push(member_id);
+    }
+
+    if (start_date) {
+      query += ' AND sell_date >= ?';
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      query += ' AND sell_date <= ?';
+      params.push(end_date);
     }
 
     query += ' GROUP BY month ORDER BY month DESC';
@@ -1168,7 +1179,7 @@ app.get('/api/analytics/monthly-performance', (req, res) => {
 // Get capital growth over time
 app.get('/api/analytics/capital-growth', (req, res) => {
   try {
-    const { member_id } = req.query;
+    const { member_id, start_date, end_date } = req.query;
 
     // 1. Get all capital transactions
     let capQuery = `
@@ -1212,7 +1223,7 @@ app.get('/api/analytics/capital-growth', (req, res) => {
       }))
     ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    const timeSeries = [];
+    let timeSeries = [];
     let currentCapital = 0;
     let netDeposits = 0;
 
@@ -1234,6 +1245,21 @@ app.get('/api/analytics/capital-growth', (req, res) => {
         });
       }
     });
+
+    // 3. Filter based on date range (post-calculation to maintain accurate running balance)
+    if (start_date) {
+      const startDateObj = new Date(start_date);
+      // Find the last known capital BEFORE the start date to serve as "opening balance" point?
+      // Or just slice. Charts usually auto-connect.
+      // Better: Include one point immediately before start_date if possible, so the line doesn't start from 0 if zoomed in.
+      // But for simplicity, just filter.
+      timeSeries = timeSeries.filter(t => new Date(t.date) >= startDateObj);
+    }
+
+    if (end_date) {
+      const endDateObj = new Date(end_date);
+      timeSeries = timeSeries.filter(t => new Date(t.date) <= endDateObj);
+    }
 
     res.json(timeSeries);
   } catch (error) {
